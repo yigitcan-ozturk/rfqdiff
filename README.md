@@ -6,19 +6,19 @@ A lightweight Python CLI for comparing supplier quotations and turning commercia
 
 ## Why rfqdiff
 
-Supplier quotations often arrive in different formats and procurement teams spend time manually comparing price, lead time and payment terms. `rfqdiff` provides a small, transparent decision-support layer for that comparison.
+Supplier quotations often arrive with different prices, lead times and payment terms. `rfqdiff` provides a small, transparent decision-support layer for comparing those commercial signals consistently.
 
-The goal is not to replace procurement judgment. It is to make the commercial comparison consistent, explainable and repeatable.
+Mixed-currency quotations should first be normalized with `currency-normalizer`.
 
 ## Features
 
 - Compare two or more supplier quotations
 - Validate required quotation fields
 - Score price, lead time and payment terms
-- Highlight the cheapest and fastest supplier
-- Highlight the supplier with the best payment terms
 - Recommend the highest-scoring supplier
-- Reject mixed currencies until normalization is applied
+- Preserve currency-normalization metadata
+- Return a stable structured JSON result
+- Write machine-readable comparison output for `supplier-scorecard`
 - Run with Python only — no third-party runtime dependencies
 
 ## Quick start
@@ -27,33 +27,50 @@ The goal is not to replace procurement judgment. It is to make the commercial co
 
 - Python 3.11+
 
-### Run the included sample
+### Compare quotations
 
 ```bash
 python main.py samples/supplier_a.json samples/supplier_b.json
 ```
 
-Example output:
+### Machine-readable output
 
-```text
-RFQDIFF v0.1
-======================================================================================
-Supplier                             Price     Lead time       Payment       Score
---------------------------------------------------------------------------------------
-Supplier A                   EUR 84,200.00       8 weeks       30 days    97.1/100
-Supplier B                   EUR 79,400.00      14 weeks        0 days    67.1/100
-
-Decision summary
---------------------------------------------------------------------------------------
-Recommended supplier : Supplier A (97.1/100)
-Lowest price         : Supplier B (EUR 79,400.00)
-Fastest lead time    : Supplier A (8 weeks)
-Best payment terms   : Supplier A (30 days)
+```bash
+python main.py \
+  samples/supplier_a.json \
+  samples/supplier_b.json \
+  --json
 ```
 
-## Quotation format
+Write the same integration payload to a file:
 
-Each supplier quotation is a JSON file:
+```bash
+python main.py \
+  samples/supplier_a.json \
+  samples/supplier_b.json \
+  --output rfq.json
+```
+
+The JSON contract contains:
+
+```json
+{
+  "tool": "rfqdiff",
+  "version": "0.2",
+  "currency": "EUR",
+  "recommended_supplier": "Supplier A",
+  "suppliers": [
+    {
+      "name": "Supplier A",
+      "score": 97.1
+    }
+  ]
+}
+```
+
+The full supplier objects also include price, lead time, payment terms and any upstream normalization metadata.
+
+## Quotation format
 
 ```json
 {
@@ -65,19 +82,18 @@ Each supplier quotation is a JSON file:
 }
 ```
 
-Required fields:
+All quotations must use the same currency. For mixed currencies:
 
-| Field | Meaning |
-| --- | --- |
-| `name` | Supplier name |
-| `currency` | Quotation currency |
-| `price` | Total quotation value |
-| `lead_time_weeks` | Delivery lead time in weeks |
-| `payment_days` | Payment term in days |
+```bash
+python ../currency-normalizer/main.py \
+  --quote supplier_usd.json \
+  --target-currency EUR \
+  --output supplier_eur.json
+```
+
+Then pass the normalized file to `rfqdiff`.
 
 ## Scoring model
-
-Current default weights:
 
 | Criterion | Weight | Better score |
 | --- | ---: | --- |
@@ -85,50 +101,49 @@ Current default weights:
 | Lead time | 30% | Lower |
 | Payment terms | 20% | Longer |
 
-The score is intentionally simple and visible in the code so the recommendation can be reviewed rather than treated as a black box.
+The score is intentionally explicit so the recommendation can be reviewed rather than treated as a black box.
+
+## Pipeline role
+
+```text
+currency-normalizer ──> rfqdiff ───────────────┐
+                                               │
+payment-terms-parser ──────────────────────────┼─> supplier-scorecard
+                                               │
+vendor-risk-engine ────────────────────────────┘
+```
+
+`supplier-scorecard` reads the supplier `score` from the `rfqdiff` JSON payload as its quotation score.
 
 ## Tests
-
-Run the test suite locally with:
 
 ```bash
 python -m unittest discover -s tests -v
 ```
 
-GitHub Actions runs the same test suite automatically on supported Python versions.
+GitHub Actions runs the same suite automatically on supported Python versions.
 
 ## Procurement tooling suite
 
-`rfqdiff` is part of a small set of transparent Python tools for supplier and procurement decision support:
-
 | Tool | Role |
 | --- | --- |
-| **[`rfqdiff`](https://github.com/yigitcan-ozturk/rfqdiff)** | Compare and score supplier quotations |
 | [`currency-normalizer`](https://github.com/yigitcan-ozturk/currency-normalizer) | Normalize quotation values across currencies |
+| **[`rfqdiff`](https://github.com/yigitcan-ozturk/rfqdiff)** | Compare and score normalized quotations |
 | [`payment-terms-parser`](https://github.com/yigitcan-ozturk/payment-terms-parser) | Convert payment terms into commercial-risk signals |
-| [`vendor-risk-engine`](https://github.com/yigitcan-ozturk/vendor-risk-engine) | Score operational, commercial, compliance and dependency risk |
-
-A typical decision flow is:
-
-```text
-currency-normalizer -> payment-terms-parser -> rfqdiff -> vendor-risk-engine
-```
-
-Each tool can run independently. The suite roadmap is to combine their outputs into a composite supplier scorecard.
+| [`vendor-risk-engine`](https://github.com/yigitcan-ozturk/vendor-risk-engine) | Score operational, quality, compliance and dependency risk |
+| [`supplier-scorecard`](https://github.com/yigitcan-ozturk/supplier-scorecard) | Combine upstream signals into one supplier recommendation |
 
 ## Roadmap
 
-- Integrate currency normalization
 - Excel/CSV import
-- PDF quotation extraction
 - Technical compliance comparison
 - Configurable scoring weights
 - Exportable comparison reports
-- Composite supplier scorecard integration
+- Richer decision explanations
 
 ## Status
 
-Early-stage project, currently at **v0.1**. The core comparison and scoring workflow is functional; the next iterations will focus on input normalization and richer procurement analysis.
+Early-stage project, currently at **v0.2**. This version adds a stable JSON integration contract and direct machine-readable output for the composite supplier-scorecard pipeline.
 
 ## License
 
