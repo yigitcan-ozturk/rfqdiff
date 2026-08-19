@@ -116,3 +116,7 @@ GitHub Actions runs the same test suite automatically on supported Python versio
 ## Status
 
 Early-stage project, currently at **v0.1**. The core comparison and scoring workflow is functional; the next iterations will focus on input normalization and richer procurement analysis.
+
+## License
+
+Released under the [MIT License](LICENSE).
