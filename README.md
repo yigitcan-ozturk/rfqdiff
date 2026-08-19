@@ -1,39 +1,33 @@
 # rfqdiff
 
-`rfqdiff` is a lightweight command-line tool for comparing supplier quotations.
+A lightweight Python CLI for comparing supplier quotations and turning commercial terms into a structured procurement decision.
 
-It reads quotation data from JSON files, scores suppliers using price, lead time and payment terms, and prints a simple procurement decision summary.
+[![Tests](https://github.com/yigitcan-ozturk/rfqdiff/actions/workflows/tests.yml/badge.svg)](https://github.com/yigitcan-ozturk/rfqdiff/actions/workflows/tests.yml)
 
-## Why this exists
+## Why rfqdiff
 
-Supplier quotations often arrive in different formats and procurement teams spend time manually comparing commercial terms. `rfqdiff` is the first building block toward a faster, structured quotation comparison workflow.
+Supplier quotations often arrive in different formats and procurement teams spend time manually comparing price, lead time and payment terms. `rfqdiff` provides a small, transparent decision-support layer for that comparison.
 
-## v0.1 features
+The goal is not to replace procurement judgment. It is to make the commercial comparison consistent, explainable and repeatable.
 
-- Compare 2 or more supplier quotations
+## Features
+
+- Compare two or more supplier quotations
 - Validate required quotation fields
-- Compare price, lead time and payment terms
-- Produce a weighted supplier score
-- Highlight the cheapest, fastest and best-payment-term supplier
+- Score price, lead time and payment terms
+- Highlight the cheapest and fastest supplier
+- Highlight the supplier with the best payment terms
 - Recommend the highest-scoring supplier
-- Reject mixed currencies until currency normalization is added
+- Reject mixed currencies until normalization is applied
+- Run with Python only — no third-party runtime dependencies
 
-## Scoring
+## Quick start
 
-Current default weights:
+### Requirements
 
-- Price: 50%
-- Lead time: 30%
-- Payment terms: 20%
+- Python 3.11+
 
-Lower price and lead time score higher. Longer payment terms score higher.
-
-## Requirements
-
-- Python 3.13+
-- No third-party Python packages required
-
-## Run the sample
+### Run the included sample
 
 ```bash
 python main.py samples/supplier_a.json samples/supplier_b.json
@@ -71,15 +65,54 @@ Each supplier quotation is a JSON file:
 }
 ```
 
+Required fields:
+
+| Field | Meaning |
+| --- | --- |
+| `name` | Supplier name |
+| `currency` | Quotation currency |
+| `price` | Total quotation value |
+| `lead_time_weeks` | Delivery lead time in weeks |
+| `payment_days` | Payment term in days |
+
+## Scoring model
+
+Current default weights:
+
+| Criterion | Weight | Better score |
+| --- | ---: | --- |
+| Price | 50% | Lower |
+| Lead time | 30% | Lower |
+| Payment terms | 20% | Longer |
+
+The score is intentionally simple and visible in the code so the recommendation can be reviewed rather than treated as a black box.
+
+## Tests
+
+Run the test suite locally with:
+
+```bash
+python -m unittest discover -s tests -v
+```
+
+GitHub Actions runs the same test suite automatically on supported Python versions.
+
+## Related tools
+
+`rfqdiff` is the comparison layer in a small procurement-tooling set:
+
+- [`payment-terms-parser`](https://github.com/yigitcan-ozturk/payment-terms-parser) — parse and standardize supplier payment terms
+- [`currency-normalizer`](https://github.com/yigitcan-ozturk/currency-normalizer) — normalize multi-currency supplier quotations
+
 ## Roadmap
 
-- Currency normalization
+- Integrate currency normalization
 - Excel/CSV import
 - PDF quotation extraction
 - Technical compliance comparison
 - Configurable scoring weights
-- Exportable comparison report
+- Exportable comparison reports
 
 ## Status
 
-Project 01 / 45 — YÖ90 Builder Track.
+Early-stage project, currently at **v0.1**. The core comparison and scoring workflow is functional; the next iterations will focus on input normalization and richer procurement analysis.
