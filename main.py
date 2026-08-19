@@ -4,6 +4,8 @@ from pathlib import Path
 from typing import Any
 
 
+VERSION = "0.2"
+
 WEIGHTS = {
     "price": 0.50,
     "lead_time": 0.30,
@@ -38,6 +40,11 @@ def load_quote(path: Path) -> dict[str, Any]:
     if quote["payment_days"] < 0:
         raise ValueError(f"{path}: payment_days cannot be negative")
 
+    quote["currency"] = str(quote["currency"]).upper()
+    quote["name"] = str(quote["name"]).strip()
+    if not quote["name"]:
+        raise ValueError(f"{path}: name cannot be empty")
+
     return quote
 
 
@@ -45,8 +52,8 @@ def validate_currencies(quotes: list[dict[str, Any]]) -> str:
     currencies = {quote["currency"].upper() for quote in quotes}
     if len(currencies) != 1:
         raise ValueError(
-            "All quotations must use the same currency in rfqdiff v0.1. "
-            "Currency normalization will be added later."
+            "All quotations must use the same currency. "
+            "Normalize mixed-currency quotations first with currency-normalizer."
         )
     return next(iter(currencies))
 
@@ -77,7 +84,47 @@ def score_quotes(quotes: list[dict[str, Any]]) -> list[dict[str, Any]]:
         scored_quote["score"] = round(total_score, 1)
         scored_quotes.append(scored_quote)
 
-    return sorted(scored_quotes, key=lambda item: item["score"], reverse=True)
+    return sorted(
+        scored_quotes,
+        key=lambda item: (-item["score"], item["name"].lower()),
+    )
+
+
+def build_result(
+    scored_quotes: list[dict[str, Any]],
+    currency: str,
+) -> dict[str, Any]:
+    winner = scored_quotes[0]
+    cheapest = min(scored_quotes, key=lambda item: item["price"])
+    fastest = min(scored_quotes, key=lambda item: item["lead_time_weeks"])
+    best_terms = max(scored_quotes, key=lambda item: item["payment_days"])
+
+    return {
+        "tool": "rfqdiff",
+        "version": VERSION,
+        "currency": currency,
+        "recommended_supplier": winner["name"],
+        "suppliers": scored_quotes,
+        "decision_summary": {
+            "recommended_supplier": {
+                "name": winner["name"],
+                "score": winner["score"],
+            },
+            "lowest_price": {
+                "name": cheapest["name"],
+                "price": cheapest["price"],
+            },
+            "fastest_lead_time": {
+                "name": fastest["name"],
+                "lead_time_weeks": fastest["lead_time_weeks"],
+            },
+            "best_payment_terms": {
+                "name": best_terms["name"],
+                "payment_days": best_terms["payment_days"],
+            },
+        },
+        "weights": WEIGHTS,
+    }
 
 
 def money(value: float, currency: str) -> str:
@@ -85,7 +132,7 @@ def money(value: float, currency: str) -> str:
 
 
 def print_report(quotes: list[dict[str, Any]], currency: str) -> None:
-    print("\nRFQDIFF v0.1")
+    print(f"\nRFQDIFF v{VERSION}")
     print("=" * 86)
     print(
         f"{'Supplier':<24}"
@@ -105,15 +152,20 @@ def print_report(quotes: list[dict[str, Any]], currency: str) -> None:
             f"{str(quote['score']) + '/100':>12}"
         )
 
-    winner = quotes[0]
-    cheapest = min(quotes, key=lambda item: item["price"])
-    fastest = min(quotes, key=lambda item: item["lead_time_weeks"])
-    best_terms = max(quotes, key=lambda item: item["payment_days"])
+    payload = build_result(quotes, currency)
+    summary = payload["decision_summary"]
+    winner = summary["recommended_supplier"]
+    cheapest = summary["lowest_price"]
+    fastest = summary["fastest_lead_time"]
+    best_terms = summary["best_payment_terms"]
 
     print("\nDecision summary")
     print("-" * 86)
     print(f"Recommended supplier : {winner['name']} ({winner['score']}/100)")
-    print(f"Lowest price         : {cheapest['name']} ({money(cheapest['price'], currency)})")
+    print(
+        f"Lowest price         : {cheapest['name']} "
+        f"({money(cheapest['price'], currency)})"
+    )
     print(
         f"Fastest lead time    : {fastest['name']} "
         f"({fastest['lead_time_weeks']} weeks)"
@@ -130,6 +182,13 @@ def print_report(quotes: list[dict[str, Any]], currency: str) -> None:
     )
 
 
+def write_json(payload: dict[str, Any], path: Path) -> None:
+    path.write_text(
+        json.dumps(payload, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Compare supplier quotations from JSON files."
@@ -139,6 +198,16 @@ def parse_args() -> argparse.Namespace:
         nargs="+",
         type=Path,
         help="Paths to supplier quotation JSON files.",
+    )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Return a machine-readable comparison payload.",
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        help="Write the machine-readable comparison payload to a JSON file.",
     )
     return parser.parse_args()
 
@@ -153,10 +222,17 @@ def main() -> None:
         quotes = [load_quote(path) for path in args.quotes]
         currency = validate_currencies(quotes)
         scored_quotes = score_quotes(quotes)
+        payload = build_result(scored_quotes, currency)
     except (OSError, json.JSONDecodeError, ValueError) as error:
         raise SystemExit(f"Error: {error}") from error
 
-    print_report(scored_quotes, currency)
+    if args.output:
+        write_json(payload, args.output)
+
+    if args.json:
+        print(json.dumps(payload, indent=2, ensure_ascii=False))
+    else:
+        print_report(scored_quotes, currency)
 
 
 if __name__ == "__main__":
