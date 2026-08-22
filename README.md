@@ -1,54 +1,49 @@
 # rfqdiff
 
-A lightweight Python CLI for comparing supplier quotations and turning commercial terms into a structured procurement decision.
+**Transparent supplier quotation comparison for structured procurement decisions.**
 
 [![Tests](https://github.com/yigitcan-ozturk/rfqdiff/actions/workflows/tests.yml/badge.svg)](https://github.com/yigitcan-ozturk/rfqdiff/actions/workflows/tests.yml)
 
-## Why rfqdiff
-
-Supplier quotations often arrive with different prices, lead times and payment terms. `rfqdiff` provides a small, transparent decision-support layer for comparing those commercial signals consistently.
+`rfqdiff` compares supplier quotations across price, lead time and payment terms while keeping the scoring model explicit and machine-readable.
 
 Mixed-currency quotations should first be normalized with `currency-normalizer`. Technical compliance is deliberately kept outside this tool and is supplied by [`bidlint`](https://github.com/yigitcan-ozturk/bidlint) at the portfolio decision layer.
 
-## Features
+## Install
 
-- Compare two or more supplier quotations
-- Validate required quotation fields
-- Score price, lead time and payment terms
-- Recommend the highest-scoring supplier
-- Preserve currency-normalization metadata
-- Return a stable structured JSON result
-- Write machine-readable comparison output for `supplier-scorecard`
-- Run with Python only — no third-party runtime dependencies
+Requirements: Python 3.11+.
+
+```bash
+git clone https://github.com/yigitcan-ozturk/rfqdiff.git
+cd rfqdiff
+python -m pip install .
+```
+
+The installed command is:
+
+```bash
+rfqdiff --help
+```
+
+The original `python main.py ...` source-checkout workflow remains supported for backward compatibility.
 
 ## Quick start
 
-### Requirements
-
-- Python 3.11+
-
-### Compare quotations
+Compare quotations:
 
 ```bash
-python main.py samples/supplier_a.json samples/supplier_b.json
+rfqdiff samples/supplier_a.json samples/supplier_b.json
 ```
 
-### Machine-readable output
+Machine-readable output:
 
 ```bash
-python main.py \
-  samples/supplier_a.json \
-  samples/supplier_b.json \
-  --json
+rfqdiff samples/supplier_a.json samples/supplier_b.json --json
 ```
 
 Write the same integration payload to a file:
 
 ```bash
-python main.py \
-  samples/supplier_a.json \
-  samples/supplier_b.json \
-  --output rfq.json
+rfqdiff samples/supplier_a.json samples/supplier_b.json --output rfq.json
 ```
 
 The JSON contract contains:
@@ -70,6 +65,17 @@ The JSON contract contains:
 
 The full supplier objects also include price, lead time, payment terms and any upstream normalization metadata.
 
+## Public Python API
+
+```python
+import rfqdiff
+
+scored = rfqdiff.score_quotes([
+    {"name": "A", "currency": "EUR", "price": 100, "lead_time_weeks": 4, "payment_days": 30},
+    {"name": "B", "currency": "EUR", "price": 120, "lead_time_weeks": 5, "payment_days": 0},
+])
+```
+
 ## Quotation format
 
 ```json
@@ -82,16 +88,7 @@ The full supplier objects also include price, lead time, payment terms and any u
 }
 ```
 
-All quotations must use the same currency. For mixed currencies:
-
-```bash
-python ../currency-normalizer/main.py \
-  --quote supplier_usd.json \
-  --target-currency EUR \
-  --output supplier_eur.json
-```
-
-Then pass the normalized file to `rfqdiff`.
+All quotations must use the same currency. For mixed currencies, normalize them first with `currency-normalizer`, then pass the normalized files to `rfqdiff`.
 
 ## Scoring model
 
@@ -117,15 +114,17 @@ bidlint ──> technical compliance ──────────────�
 
 `supplier-scorecard` reads the supplier `score` from the `rfqdiff` JSON payload as its quotation score. Engineering compliance remains an independent input from `bidlint`, keeping commercial and technical decisions separately auditable.
 
-## Tests
+## Quality gates
 
-```bash
-python -m unittest discover -s tests -v
-```
+GitHub Actions validates:
 
-GitHub Actions runs the same suite automatically on supported Python versions.
+- unit tests on Python 3.11, 3.12 and 3.13;
+- wheel and source-distribution builds;
+- package metadata with `twine check`;
+- installation of the built wheel;
+- the installed `rfqdiff` console command and public package namespace.
 
-## Procurement tooling suite
+## Engineering procurement toolchain
 
 | Tool | Role |
 | --- | --- |
@@ -146,7 +145,7 @@ GitHub Actions runs the same suite automatically on supported Python versions.
 
 ## Status
 
-Early-stage project, currently at **v0.2**. This version adds a stable JSON integration contract and direct machine-readable output for the composite supplier-scorecard pipeline.
+Early-stage project, currently at **v0.2**. The current line provides a stable JSON integration contract plus an installable Python package and console CLI.
 
 ## License
 
