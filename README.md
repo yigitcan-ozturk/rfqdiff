@@ -8,7 +8,7 @@ A lightweight Python CLI for comparing supplier quotations and turning commercia
 
 Supplier quotations often arrive with different prices, lead times and payment terms. `rfqdiff` provides a small, transparent decision-support layer for comparing those commercial signals consistently.
 
-Mixed-currency quotations should first be normalized with `currency-normalizer`.
+Mixed-currency quotations should first be normalized with `currency-normalizer`. Technical compliance is deliberately kept outside this tool and is supplied by [`bidlint`](https://github.com/yigitcan-ozturk/bidlint) at the portfolio decision layer.
 
 ## Features
 
@@ -106,14 +106,16 @@ The score is intentionally explicit so the recommendation can be reviewed rather
 ## Pipeline role
 
 ```text
-currency-normalizer ──> rfqdiff ───────────────┐
-                                               │
-payment-terms-parser ──────────────────────────┼─> supplier-scorecard
-                                               │
-vendor-risk-engine ────────────────────────────┘
+currency-normalizer ──> rfqdiff ───────────────────────┐
+                                                        │
+payment-terms-parser ──────────────────────────────────┼──> supplier-scorecard
+                                                        │
+vendor-risk-engine ────────────────────────────────────┤
+                                                        │
+bidlint ──> technical compliance ──────────────────────┘
 ```
 
-`supplier-scorecard` reads the supplier `score` from the `rfqdiff` JSON payload as its quotation score.
+`supplier-scorecard` reads the supplier `score` from the `rfqdiff` JSON payload as its quotation score. Engineering compliance remains an independent input from `bidlint`, keeping commercial and technical decisions separately auditable.
 
 ## Tests
 
@@ -131,14 +133,15 @@ GitHub Actions runs the same suite automatically on supported Python versions.
 | **[`rfqdiff`](https://github.com/yigitcan-ozturk/rfqdiff)** | Compare and score normalized quotations |
 | [`payment-terms-parser`](https://github.com/yigitcan-ozturk/payment-terms-parser) | Convert payment terms into commercial-risk signals |
 | [`vendor-risk-engine`](https://github.com/yigitcan-ozturk/vendor-risk-engine) | Score operational, quality, compliance and dependency risk |
-| [`supplier-scorecard`](https://github.com/yigitcan-ozturk/supplier-scorecard) | Combine upstream signals into one supplier recommendation |
+| [`bidlint`](https://github.com/yigitcan-ozturk/bidlint) | Produce evidence-backed technical-compliance findings and scores |
+| [`supplier-scorecard`](https://github.com/yigitcan-ozturk/supplier-scorecard) | Combine commercial, risk and technical signals into one supplier recommendation |
 
 ## Roadmap
 
-- Excel/CSV import
-- Technical compliance comparison
-- Configurable scoring weights
+- Excel/CSV quotation import
+- Configurable commercial scoring weights
 - Exportable comparison reports
+- Richer quotation provenance
 - Richer decision explanations
 
 ## Status
