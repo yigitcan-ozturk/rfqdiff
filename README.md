@@ -3,10 +3,39 @@
 **Transparent supplier quotation comparison for structured procurement decisions.**
 
 [![Tests](https://github.com/yigitcan-ozturk/rfqdiff/actions/workflows/tests.yml/badge.svg)](https://github.com/yigitcan-ozturk/rfqdiff/actions/workflows/tests.yml)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-`rfqdiff` compares supplier quotations across price, lead time and payment terms while keeping the scoring model explicit and machine-readable.
+`rfqdiff` compares supplier quotations across price, lead time and payment terms while keeping the scoring model explicit, deterministic and machine-readable.
 
-Mixed-currency quotations should first be normalized with `currency-normalizer`. Technical compliance is deliberately kept outside this tool and is supplied by [`bidlint`](https://github.com/yigitcan-ozturk/bidlint) at the portfolio decision layer.
+Mixed-currency quotations should first be normalized with [`currency-normalizer`](https://github.com/yigitcan-ozturk/currency-normalizer). Technical compliance is deliberately kept outside this tool and is supplied by [`bidlint`](https://github.com/yigitcan-ozturk/bidlint) at the portfolio decision layer.
+
+## Why rfqdiff
+
+Supplier quotations are often compared in spreadsheets where assumptions, weights and recommendation logic become difficult to audit. `rfqdiff` keeps the commercial comparison small and inspectable: every score is produced from explicit inputs and explicit weights.
+
+The goal is not to automate procurement judgment. The goal is to make a commercial comparison reproducible enough that a reviewer can understand how the recommendation was produced.
+
+## Decision boundary
+
+`rfqdiff` is responsible for **commercial quotation comparison**.
+
+It does:
+
+- compare price, lead time and payment terms;
+- produce deterministic supplier scores;
+- return machine-readable JSON for downstream decision systems;
+- preserve upstream normalization metadata when present.
+
+It intentionally does **not**:
+
+- fetch or infer FX rates;
+- determine technical compliance;
+- score operational supplier risk;
+- make contractual acceptance decisions;
+- hide unsupported criteria inside an opaque composite score.
+
+Those responsibilities remain separated across the engineering procurement toolchain.
 
 ## Install
 
@@ -112,7 +141,7 @@ vendor-risk-engine ────────────────────�
 bidlint ──> technical compliance ──────────────────────┘
 ```
 
-`supplier-scorecard` reads the supplier `score` from the `rfqdiff` JSON payload as its quotation score. Engineering compliance remains an independent input from `bidlint`, keeping commercial and technical decisions separately auditable.
+[`supplier-scorecard`](https://github.com/yigitcan-ozturk/supplier-scorecard) reads the supplier `score` from the `rfqdiff` JSON payload as its quotation score. Engineering compliance remains an independent input from `bidlint`, keeping commercial and technical decisions separately auditable.
 
 ## Quality gates
 
@@ -123,6 +152,14 @@ GitHub Actions validates:
 - package metadata with `twine check`;
 - installation of the built wheel;
 - the installed `rfqdiff` console command and public package namespace.
+
+## Engineering principles
+
+- **Explicit scoring** — weights and criteria remain visible.
+- **Deterministic results** — identical supported inputs produce identical comparison results.
+- **Separation of concerns** — FX, technical compliance and supplier risk stay outside quotation scoring.
+- **Machine-readable handoff** — downstream tools consume a stable structured result instead of scraping presentation text.
+- **Review before authority** — a recommendation supports procurement judgment; it does not replace approval.
 
 ## Engineering procurement toolchain
 
