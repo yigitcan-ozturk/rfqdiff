@@ -42,5 +42,35 @@ jobs:
       - name: Smoke test installed CLI
         run: rfqdiff --help
 
+      - name: Smoke test installed CLI comparison
+        shell: bash
+        run: |
+          tmpdir="$(mktemp -d)"
+          cd "$tmpdir"
+          printf 'name,currency,price,lead_time_weeks,payment_days\nSupplier A,EUR,100,4,30\nSupplier B,EUR,120,5,0\n' > quotations.csv
+          rfqdiff quotations.csv --json > result.json
+          rfqdiff quotations.csv --report comparison.xlsx > /dev/null
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from openpyxl import load_workbook
+
+          payload = json.loads(Path("result.json").read_text(encoding="utf-8"))
+          assert payload["tool"] == "rfqdiff"
+          assert payload["version"] == "0.2"
+          assert payload["recommended_supplier"] == "Supplier A"
+          assert payload["decision_summary"]["runner_up"]["name"] == "Supplier B"
+          assert payload["suppliers"][0]["score_breakdown"]["price"] == 50.0
+          assert payload["suppliers"][0]["rfqdiff_source"]["file"] == "quotations.csv"
+
+          workbook = load_workbook("comparison.xlsx", read_only=True, data_only=True)
+          try:
+              assert workbook.sheetnames == ["Comparison", "Summary"]
+              assert workbook["Comparison"]["C2"].value == "Supplier A"
+              assert workbook["Summary"]["B2"].value == "Supplier A"
+          finally:
+              workbook.close()
+          PY
+
       - name: Smoke test installed package
         run: python -c "import rfqdiff; assert rfqdiff.__version__ == '0.2.0'"
