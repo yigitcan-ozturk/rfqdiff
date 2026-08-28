@@ -40,6 +40,9 @@ class ReportExportTests(unittest.TestCase):
         self.assertEqual(rows[0]["name"], "Supplier A")
         self.assertEqual(rows[0]["recommended"], "True")
         self.assertEqual(rows[0]["currency"], "EUR")
+        self.assertEqual(rows[0]["price_score"], "47.1")
+        self.assertEqual(rows[0]["lead_time_score"], "30.0")
+        self.assertEqual(rows[0]["payment_terms_score"], "20.0")
 
     def test_write_xlsx_report_exports_comparison_and_summary(self) -> None:
         from openpyxl import load_workbook
@@ -54,12 +57,19 @@ class ReportExportTests(unittest.TestCase):
                 comparison = workbook["Comparison"]
                 self.assertEqual(comparison["C2"].value, "Supplier A")
                 self.assertTrue(comparison["B2"].value)
+                self.assertEqual(comparison["I2"].value, 47.1)
+                self.assertEqual(comparison["J2"].value, 30.0)
+                self.assertEqual(comparison["K2"].value, 20.0)
 
                 summary = workbook["Summary"]
                 self.assertEqual(summary["A2"].value, "Recommended supplier")
                 self.assertEqual(summary["B2"].value, "Supplier A")
-                self.assertEqual(summary["A8"].value, "price")
-                self.assertEqual(summary["B8"].value, 0.5)
+                self.assertEqual(summary["A3"].value, "Runner-up")
+                self.assertEqual(summary["B3"].value, "Supplier B")
+                self.assertEqual(summary["A4"].value, "Score margin")
+                self.assertEqual(summary["C4"].value, 10.0)
+                self.assertEqual(summary["A10"].value, "price")
+                self.assertEqual(summary["B10"].value, 0.5)
             finally:
                 workbook.close()
 
