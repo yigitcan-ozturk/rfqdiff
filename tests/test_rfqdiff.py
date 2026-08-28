@@ -19,7 +19,14 @@ class LoadQuoteTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "quote.json"
             path.write_text(json.dumps(quote), encoding="utf-8")
-            self.assertEqual(rfqdiff.load_quote(path), quote)
+            loaded = rfqdiff.load_quote(path)
+
+        self.assertEqual(loaded["name"], quote["name"])
+        self.assertEqual(loaded["currency"], quote["currency"])
+        self.assertEqual(loaded["price"], quote["price"])
+        self.assertEqual(loaded["lead_time_weeks"], quote["lead_time_weeks"])
+        self.assertEqual(loaded["payment_days"], quote["payment_days"])
+        self.assertEqual(loaded["rfqdiff_source"]["format"], "json")
 
     def test_load_quote_accepts_currency_normalizer_metadata(self) -> None:
         quote = {
