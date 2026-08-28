@@ -23,9 +23,10 @@ The goal is not to automate procurement judgment. The goal is to make a commerci
 It does:
 
 - compare price, lead time and payment terms;
+- import quotations from JSON, CSV and Excel (`.xlsx`);
 - produce deterministic supplier scores;
 - return machine-readable JSON for downstream decision systems;
-- preserve upstream normalization metadata when present.
+- preserve upstream normalization metadata when present in JSON inputs.
 
 It intentionally does **not**:
 
@@ -57,23 +58,37 @@ The original `python main.py ...` source-checkout workflow remains supported for
 
 ## Quick start
 
-Compare quotations:
+Compare separate JSON quotations:
 
 ```bash
 rfqdiff samples/supplier_a.json samples/supplier_b.json
 ```
 
+Compare multiple suppliers from one CSV file:
+
+```bash
+rfqdiff samples/quotations.csv
+```
+
+Excel workbooks use the same columns and can be passed directly:
+
+```bash
+rfqdiff quotations.xlsx
+```
+
 Machine-readable output:
 
 ```bash
-rfqdiff samples/supplier_a.json samples/supplier_b.json --json
+rfqdiff samples/quotations.csv --json
 ```
 
 Write the same integration payload to a file:
 
 ```bash
-rfqdiff samples/supplier_a.json samples/supplier_b.json --output rfq.json
+rfqdiff samples/quotations.csv --output rfq.json
 ```
+
+JSON, CSV and XLSX inputs can also be combined in one command as long as every quotation uses the same currency.
 
 The JSON contract contains:
 
@@ -105,7 +120,18 @@ scored = rfqdiff.score_quotes([
 ])
 ```
 
+Tabular files can be loaded through the public API as well:
+
+```python
+from pathlib import Path
+import rfqdiff
+
+quotes = rfqdiff.load_quotes(Path("quotations.xlsx"))
+```
+
 ## Quotation format
+
+A JSON quotation contains one supplier:
 
 ```json
 {
@@ -117,7 +143,25 @@ scored = rfqdiff.score_quotes([
 }
 ```
 
-All quotations must use the same currency. For mixed currencies, normalize them first with `currency-normalizer`, then pass the normalized files to `rfqdiff`.
+CSV and Excel files use one supplier per row with these required columns:
+
+| Column | Meaning |
+| --- | --- |
+| `name` | Supplier name |
+| `currency` | ISO-style currency code used by the quotation |
+| `price` | Commercial quotation value |
+| `lead_time_weeks` | Lead time in weeks |
+| `payment_days` | Payment term length in days |
+
+Example CSV:
+
+```csv
+name,currency,price,lead_time_weeks,payment_days
+Supplier A,EUR,84200,8,30
+Supplier B,EUR,79400,14,0
+```
+
+All quotations must use the same currency. For mixed currencies, normalize them first with `currency-normalizer`, then pass the normalized values to `rfqdiff`.
 
 ## Scoring model
 
@@ -148,9 +192,10 @@ bidlint ──> technical compliance ──────────────�
 GitHub Actions validates:
 
 - unit tests on Python 3.11, 3.12 and 3.13;
+- JSON, CSV and Excel quotation loading;
 - wheel and source-distribution builds;
 - package metadata with `twine check`;
-- installation of the built wheel;
+- installation of the built wheel and runtime dependencies;
 - the installed `rfqdiff` console command and public package namespace.
 
 ## Engineering principles
@@ -174,7 +219,6 @@ GitHub Actions validates:
 
 ## Roadmap
 
-- Excel/CSV quotation import
 - Configurable commercial scoring weights
 - Exportable comparison reports
 - Richer quotation provenance
@@ -182,7 +226,7 @@ GitHub Actions validates:
 
 ## Status
 
-Early-stage project, currently at **v0.2**. The current line provides a stable JSON integration contract plus an installable Python package and console CLI.
+Early-stage project, currently at **v0.2**. The current line provides a stable JSON integration contract, an installable Python package and console CLI, plus JSON/CSV/XLSX quotation ingestion.
 
 ## License
 
