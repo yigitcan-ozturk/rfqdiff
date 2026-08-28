@@ -308,6 +308,11 @@ def score_quotes(
 
         scored_quote = quote.copy()
         scored_quote["score"] = round(total_score, 1)
+        scored_quote["score_breakdown"] = {
+            "price": round(price_score, 1),
+            "lead_time": round(lead_time_score, 1),
+            "payment_terms": round(payment_score, 1),
+        }
         scored_quotes.append(scored_quote)
 
     return sorted(
@@ -323,9 +328,19 @@ def build_result(
 ) -> dict[str, Any]:
     effective_weights = validate_weights(WEIGHTS if weights is None else weights)
     winner = scored_quotes[0]
+    runner_up = scored_quotes[1] if len(scored_quotes) > 1 else None
+    score_margin = (
+        round(winner["score"] - runner_up["score"], 1) if runner_up else None
+    )
     cheapest = min(scored_quotes, key=lambda item: item["price"])
     fastest = min(scored_quotes, key=lambda item: item["lead_time_weeks"])
     best_terms = max(scored_quotes, key=lambda item: item["payment_days"])
+
+    runner_up_summary = (
+        {"name": runner_up["name"], "score": runner_up["score"]}
+        if runner_up
+        else None
+    )
 
     return {
         "tool": "rfqdiff",
@@ -338,6 +353,8 @@ def build_result(
                 "name": winner["name"],
                 "score": winner["score"],
             },
+            "runner_up": runner_up_summary,
+            "score_margin": score_margin,
             "lowest_price": {
                 "name": cheapest["name"],
                 "price": cheapest["price"],
@@ -349,6 +366,17 @@ def build_result(
             "best_payment_terms": {
                 "name": best_terms["name"],
                 "payment_days": best_terms["payment_days"],
+            },
+        },
+        "decision_explanation": {
+            "winner": winner["name"],
+            "runner_up": runner_up["name"] if runner_up else None,
+            "score_margin": score_margin,
+            "winner_score_breakdown": winner["score_breakdown"],
+            "criterion_leaders": {
+                "price": cheapest["name"],
+                "lead_time": fastest["name"],
+                "payment_terms": best_terms["name"],
             },
         },
         "weights": effective_weights,
@@ -387,7 +415,9 @@ def print_report(
 
     payload = build_result(quotes, currency, effective_weights)
     summary = payload["decision_summary"]
+    explanation = payload["decision_explanation"]
     winner = summary["recommended_supplier"]
+    runner_up = summary["runner_up"]
     cheapest = summary["lowest_price"]
     fastest = summary["fastest_lead_time"]
     best_terms = summary["best_payment_terms"]
@@ -395,6 +425,9 @@ def print_report(
     print("\nDecision summary")
     print("-" * 86)
     print(f"Recommended supplier : {winner['name']} ({winner['score']}/100)")
+    if runner_up:
+        print(f"Runner-up            : {runner_up['name']} ({runner_up['score']}/100)")
+        print(f"Score margin         : {summary['score_margin']} points")
     print(
         f"Lowest price         : {cheapest['name']} "
         f"({money(cheapest['price'], currency)})"
@@ -406,6 +439,15 @@ def print_report(
     print(
         f"Best payment terms   : {best_terms['name']} "
         f"({best_terms['payment_days']} days)"
+    )
+
+    breakdown = explanation["winner_score_breakdown"]
+    print("\nWinner score breakdown")
+    print("-" * 86)
+    print(
+        f"Price {breakdown['price']}/100 contribution | "
+        f"Lead time {breakdown['lead_time']}/100 contribution | "
+        f"Payment terms {breakdown['payment_terms']}/100 contribution"
     )
 
     print("\nScoring weights")
@@ -445,6 +487,9 @@ def write_csv_report(payload: dict[str, Any], path: Path) -> None:
         "lead_time_weeks",
         "payment_days",
         "score",
+        "price_score",
+        "lead_time_score",
+        "payment_terms_score",
         "source_file",
         "source_format",
         "source_sha256",
@@ -455,6 +500,7 @@ def write_csv_report(payload: dict[str, Any], path: Path) -> None:
         writer = csv.DictWriter(file, fieldnames=fieldnames)
         writer.writeheader()
         for rank, quote in enumerate(payload["suppliers"], start=1):
+            breakdown = quote.get("score_breakdown", {})
             row = {
                 "rank": rank,
                 "recommended": quote["name"] == payload["recommended_supplier"],
@@ -464,6 +510,9 @@ def write_csv_report(payload: dict[str, Any], path: Path) -> None:
                 "lead_time_weeks": quote["lead_time_weeks"],
                 "payment_days": quote["payment_days"],
                 "score": quote["score"],
+                "price_score": breakdown.get("price", ""),
+                "lead_time_score": breakdown.get("lead_time", ""),
+                "payment_terms_score": breakdown.get("payment_terms", ""),
             }
             row.update(_report_source_fields(quote))
             writer.writerow(row)
@@ -490,6 +539,9 @@ def write_xlsx_report(payload: dict[str, Any], path: Path) -> None:
             "Lead Time (Weeks)",
             "Payment Days",
             "Score",
+            "Price Score",
+            "Lead Time Score",
+            "Payment Terms Score",
             "Source File",
             "Source Format",
             "Source SHA-256",
@@ -499,6 +551,7 @@ def write_xlsx_report(payload: dict[str, Any], path: Path) -> None:
     )
     for rank, quote in enumerate(payload["suppliers"], start=1):
         source = quote.get("rfqdiff_source", {})
+        breakdown = quote.get("score_breakdown", {})
         comparison.append(
             [
                 rank,
@@ -509,6 +562,9 @@ def write_xlsx_report(payload: dict[str, Any], path: Path) -> None:
                 quote["lead_time_weeks"],
                 quote["payment_days"],
                 quote["score"],
+                breakdown.get("price", ""),
+                breakdown.get("lead_time", ""),
+                breakdown.get("payment_terms", ""),
                 source.get("file", ""),
                 source.get("format", ""),
                 source.get("sha256", ""),
@@ -529,6 +585,15 @@ def write_xlsx_report(payload: dict[str, Any], path: Path) -> None:
             decision["recommended_supplier"]["score"],
         ]
     )
+    runner_up = decision.get("runner_up")
+    summary.append(
+        [
+            "Runner-up",
+            runner_up["name"] if runner_up else "",
+            runner_up["score"] if runner_up else "",
+        ]
+    )
+    summary.append(["Score margin", "", decision.get("score_margin", "")])
     summary.append(
         [
             "Lowest price",
