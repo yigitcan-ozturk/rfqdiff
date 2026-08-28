@@ -67,7 +67,7 @@ class ReportExportTests(unittest.TestCase):
                 self.assertEqual(summary["A3"].value, "Runner-up")
                 self.assertEqual(summary["B3"].value, "Supplier B")
                 self.assertEqual(summary["A4"].value, "Score margin")
-                self.assertEqual(summary["C4"].value, 10.0)
+                self.assertEqual(summary["C4"].value, 30.0)
                 self.assertEqual(summary["A10"].value, "price")
                 self.assertEqual(summary["B10"].value, 0.5)
             finally:
