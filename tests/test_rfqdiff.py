@@ -55,6 +55,64 @@ class LoadQuoteTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "payment_days"):
                 rfqdiff.load_quote(path)
 
+    def test_load_csv_quotes_accepts_multiple_suppliers(self) -> None:
+        csv_content = (
+            "name,currency,price,lead_time_weeks,payment_days\n"
+            "Supplier A,eur,84200,8,30\n"
+            "Supplier B,EUR,79400,14,0\n"
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "quotes.csv"
+            path.write_text(csv_content, encoding="utf-8")
+            loaded = rfqdiff.load_quotes(path)
+
+        self.assertEqual(len(loaded), 2)
+        self.assertEqual(loaded[0]["name"], "Supplier A")
+        self.assertEqual(loaded[0]["currency"], "EUR")
+        self.assertEqual(loaded[0]["price"], 84200)
+        self.assertEqual(loaded[1]["payment_days"], 0)
+
+    def test_load_xlsx_quotes_accepts_multiple_suppliers(self) -> None:
+        from openpyxl import Workbook
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "quotes.xlsx"
+            workbook = Workbook()
+            worksheet = workbook.active
+            worksheet.append(
+                ["name", "currency", "price", "lead_time_weeks", "payment_days"]
+            )
+            worksheet.append(["Supplier A", "EUR", 84200, 8, 30])
+            worksheet.append(["Supplier B", "EUR", 79400, 14, 0])
+            workbook.save(path)
+            workbook.close()
+
+            loaded = rfqdiff.load_quotes(path)
+
+        self.assertEqual(len(loaded), 2)
+        self.assertEqual(loaded[1]["name"], "Supplier B")
+        self.assertEqual(loaded[1]["price"], 79400)
+
+    def test_load_tabular_quotes_rejects_missing_required_column(self) -> None:
+        csv_content = (
+            "name,currency,price,lead_time_weeks\n"
+            "Supplier A,EUR,84200,8\n"
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "quotes.csv"
+            path.write_text(csv_content, encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "payment_days"):
+                rfqdiff.load_quotes(path)
+
+    def test_load_quotes_rejects_unsupported_format(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "quotes.txt"
+            path.write_text("unsupported", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "unsupported quotation format"):
+                rfqdiff.load_quotes(path)
+
 
 class CurrencyValidationTests(unittest.TestCase):
     def test_validate_currencies_accepts_single_currency(self) -> None:
