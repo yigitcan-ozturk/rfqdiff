@@ -11,6 +11,7 @@ from main import (
     validate_currencies,
     validate_quote,
     validate_weights,
+    write_report,
 )
 
 __version__ = "0.2.0"
@@ -27,4 +28,5 @@ __all__ = [
     "validate_currencies",
     "validate_quote",
     "validate_weights",
+    "write_report",
 ]
