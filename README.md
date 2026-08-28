@@ -27,6 +27,7 @@ It does:
 - use explicit default or user-supplied commercial scoring weights;
 - produce deterministic supplier scores;
 - return machine-readable JSON for downstream decision systems;
+- export ranked comparison reports as CSV or Excel;
 - preserve upstream normalization metadata when present in JSON inputs.
 
 It intentionally does **not**:
@@ -89,6 +90,13 @@ Write the same integration payload to a file:
 rfqdiff samples/quotations.csv --output rfq.json
 ```
 
+Export a ranked comparison report:
+
+```bash
+rfqdiff samples/quotations.csv --report comparison.csv
+rfqdiff samples/quotations.csv --report comparison.xlsx
+```
+
 JSON, CSV and XLSX inputs can also be combined in one command as long as every quotation uses the same currency.
 
 ## Configurable scoring weights
@@ -123,6 +131,27 @@ Weight profiles are deliberately strict:
 - values must sum to exactly `1.0` within floating-point tolerance.
 
 The effective profile is returned in the output payload under `weights`, keeping each recommendation auditable.
+
+## Comparison report exports
+
+`--report` produces reviewer-friendly exports without replacing the machine-readable JSON contract.
+
+CSV reports contain one ranked supplier per row with:
+
+- rank;
+- recommended flag;
+- supplier name;
+- currency and price;
+- lead time;
+- payment terms;
+- final score.
+
+Excel reports contain two worksheets:
+
+- `Comparison` — the ranked supplier table;
+- `Summary` — recommended supplier, lowest price, fastest lead time, best payment terms and the effective scoring weights.
+
+The report uses the same scored payload as the JSON output, so the human-facing export and downstream integration result remain aligned.
 
 The JSON contract contains:
 
@@ -174,6 +203,13 @@ import rfqdiff
 
 quotes = rfqdiff.load_quotes(Path("quotations.xlsx"))
 weights = rfqdiff.load_weights(Path("weights.json"))
+```
+
+Comparison reports can be exported from a built result:
+
+```python
+payload = rfqdiff.build_result(scored, "EUR", weights)
+rfqdiff.write_report(payload, Path("comparison.xlsx"))
 ```
 
 ## Quotation format
@@ -232,6 +268,7 @@ GitHub Actions validates:
 - JSON, CSV and Excel quotation loading;
 - default and configurable scoring profiles;
 - rejection of incomplete or unsupported weight profiles;
+- CSV and Excel comparison report exports;
 - wheel and source-distribution builds;
 - package metadata with `twine check`;
 - installation of the built wheel and runtime dependencies;
@@ -258,13 +295,12 @@ GitHub Actions validates:
 
 ## Roadmap
 
-- Exportable comparison reports
 - Richer quotation provenance
 - Richer decision explanations
 
 ## Status
 
-Early-stage project, currently at **v0.2**. The current line provides a stable JSON integration contract, an installable Python package and console CLI, JSON/CSV/XLSX quotation ingestion, and auditable configurable commercial scoring weights.
+Early-stage project, currently at **v0.2**. The current line provides a stable JSON integration contract, an installable Python package and console CLI, JSON/CSV/XLSX quotation ingestion, auditable configurable commercial scoring weights, and CSV/XLSX comparison report export.
 
 ## License
 
