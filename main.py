@@ -1,4 +1,5 @@
 import argparse
+import csv
 import json
 from pathlib import Path
 from typing import Any
@@ -12,40 +13,151 @@ WEIGHTS = {
     "payment_terms": 0.20,
 }
 
+REQUIRED_FIELDS = [
+    "name",
+    "currency",
+    "price",
+    "lead_time_weeks",
+    "payment_days",
+]
+
+
+def _coerce_number(value: Any, field: str, source: str) -> int | float:
+    if isinstance(value, bool):
+        raise ValueError(f"{source}: {field} must be numeric")
+
+    if isinstance(value, (int, float)):
+        number = value
+    else:
+        try:
+            number = float(str(value).strip())
+        except (TypeError, ValueError) as error:
+            raise ValueError(f"{source}: {field} must be numeric") from error
+
+    if isinstance(number, float) and number.is_integer():
+        return int(number)
+    return number
+
+
+def validate_quote(quote: dict[str, Any], source: str) -> dict[str, Any]:
+    missing = [field for field in REQUIRED_FIELDS if field not in quote]
+    if missing:
+        raise ValueError(
+            f"{source}: missing required field(s): {', '.join(missing)}"
+        )
+
+    validated = quote.copy()
+    validated["price"] = _coerce_number(validated["price"], "price", source)
+    validated["lead_time_weeks"] = _coerce_number(
+        validated["lead_time_weeks"], "lead_time_weeks", source
+    )
+    validated["payment_days"] = _coerce_number(
+        validated["payment_days"], "payment_days", source
+    )
+
+    if validated["price"] <= 0:
+        raise ValueError(f"{source}: price must be greater than 0")
+
+    if validated["lead_time_weeks"] <= 0:
+        raise ValueError(f"{source}: lead_time_weeks must be greater than 0")
+
+    if validated["payment_days"] < 0:
+        raise ValueError(f"{source}: payment_days cannot be negative")
+
+    validated["currency"] = str(validated["currency"]).strip().upper()
+    if not validated["currency"]:
+        raise ValueError(f"{source}: currency cannot be empty")
+
+    validated["name"] = str(validated["name"]).strip()
+    if not validated["name"]:
+        raise ValueError(f"{source}: name cannot be empty")
+
+    return validated
+
 
 def load_quote(path: Path) -> dict[str, Any]:
     with path.open("r", encoding="utf-8") as file:
         quote = json.load(file)
 
-    required_fields = [
-        "name",
-        "currency",
-        "price",
-        "lead_time_weeks",
-        "payment_days",
-    ]
+    if not isinstance(quote, dict):
+        raise ValueError(f"{path}: quotation JSON must contain one object")
 
-    missing = [field for field in required_fields if field not in quote]
-    if missing:
+    return validate_quote(quote, str(path))
+
+
+def load_csv_quotes(path: Path) -> list[dict[str, Any]]:
+    with path.open("r", encoding="utf-8-sig", newline="") as file:
+        reader = csv.DictReader(file)
+        fieldnames = reader.fieldnames or []
+        missing = [field for field in REQUIRED_FIELDS if field not in fieldnames]
+        if missing:
+            raise ValueError(
+                f"{path}: missing required column(s): {', '.join(missing)}"
+            )
+
+        quotes = [
+            validate_quote(dict(row), f"{path}: row {row_number}")
+            for row_number, row in enumerate(reader, start=2)
+            if any(value not in (None, "") for value in row.values())
+        ]
+
+    if not quotes:
+        raise ValueError(f"{path}: no supplier quotations found")
+    return quotes
+
+
+def load_xlsx_quotes(path: Path) -> list[dict[str, Any]]:
+    try:
+        from openpyxl import load_workbook
+    except ImportError as error:
         raise ValueError(
-            f"{path}: missing required field(s): {', '.join(missing)}"
-        )
+            "Excel import requires openpyxl. Install the project package dependencies first."
+        ) from error
 
-    if quote["price"] <= 0:
-        raise ValueError(f"{path}: price must be greater than 0")
+    workbook = load_workbook(path, read_only=True, data_only=True)
+    try:
+        worksheet = workbook.active
+        rows = worksheet.iter_rows(values_only=True)
+        try:
+            header_row = next(rows)
+        except StopIteration as error:
+            raise ValueError(f"{path}: workbook is empty") from error
 
-    if quote["lead_time_weeks"] <= 0:
-        raise ValueError(f"{path}: lead_time_weeks must be greater than 0")
+        fieldnames = [
+            str(value).strip() if value is not None else "" for value in header_row
+        ]
+        missing = [field for field in REQUIRED_FIELDS if field not in fieldnames]
+        if missing:
+            raise ValueError(
+                f"{path}: missing required column(s): {', '.join(missing)}"
+            )
 
-    if quote["payment_days"] < 0:
-        raise ValueError(f"{path}: payment_days cannot be negative")
+        quotes = []
+        for row_number, values in enumerate(rows, start=2):
+            if not any(value not in (None, "") for value in values):
+                continue
+            row = dict(zip(fieldnames, values))
+            quotes.append(validate_quote(row, f"{path}: row {row_number}"))
+    finally:
+        workbook.close()
 
-    quote["currency"] = str(quote["currency"]).upper()
-    quote["name"] = str(quote["name"]).strip()
-    if not quote["name"]:
-        raise ValueError(f"{path}: name cannot be empty")
+    if not quotes:
+        raise ValueError(f"{path}: no supplier quotations found")
+    return quotes
 
-    return quote
+
+def load_quotes(path: Path) -> list[dict[str, Any]]:
+    suffix = path.suffix.lower()
+    if suffix == ".json":
+        return [load_quote(path)]
+    if suffix == ".csv":
+        return load_csv_quotes(path)
+    if suffix == ".xlsx":
+        return load_xlsx_quotes(path)
+    raise ValueError(
+        f"{path}: unsupported quotation format '{suffix or '<none>'}'. "
+        "Use .json, .csv or .xlsx."
+    )
 
 
 def validate_currencies(quotes: list[dict[str, Any]]) -> str:
@@ -191,13 +303,13 @@ def write_json(payload: dict[str, Any], path: Path) -> None:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Compare supplier quotations from JSON files."
+        description="Compare supplier quotations from JSON, CSV or Excel files."
     )
     parser.add_argument(
         "quotes",
         nargs="+",
         type=Path,
-        help="Paths to supplier quotation JSON files.",
+        help="Quotation files (.json, .csv or .xlsx). Tabular files may contain multiple suppliers.",
     )
     parser.add_argument(
         "--json",
@@ -215,11 +327,10 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
 
-    if len(args.quotes) < 2:
-        raise SystemExit("rfqdiff needs at least two supplier quotation files.")
-
     try:
-        quotes = [load_quote(path) for path in args.quotes]
+        quotes = [quote for path in args.quotes for quote in load_quotes(path)]
+        if len(quotes) < 2:
+            raise ValueError("rfqdiff needs at least two supplier quotations.")
         currency = validate_currencies(quotes)
         scored_quotes = score_quotes(quotes)
         payload = build_result(scored_quotes, currency)
