@@ -14,7 +14,7 @@ Mixed-currency quotations should first be normalized with [`currency-normalizer`
 
 Supplier quotations are often compared in spreadsheets where assumptions, weights and recommendation logic become difficult to audit. `rfqdiff` keeps the commercial comparison small and inspectable: every score is produced from explicit inputs and explicit weights.
 
-The goal is not to automate procurement judgment. The goal is to make a commercial comparison reproducible enough that a reviewer can understand how the recommendation was produced and trace each loaded quotation back to its input file.
+The goal is not to automate procurement judgment. The goal is to make a commercial comparison reproducible enough that a reviewer can understand how the recommendation was produced, see which criteria contributed to the result, and trace each loaded quotation back to its input file.
 
 ## Decision boundary
 
@@ -25,8 +25,9 @@ It does:
 - compare price, lead time and payment terms;
 - import quotations from JSON, CSV and Excel (`.xlsx`);
 - use explicit default or user-supplied commercial scoring weights;
-- produce deterministic supplier scores;
-- return machine-readable JSON for downstream decision systems;
+- produce deterministic supplier scores and criterion-level score contributions;
+- identify the runner-up and score margin;
+- return machine-readable decision explanations for downstream systems;
 - export ranked comparison reports as CSV or Excel;
 - attach source-file provenance to loaded quotations;
 - preserve upstream normalization metadata when present in JSON inputs.
@@ -37,6 +38,7 @@ It intentionally does **not**:
 - determine technical compliance;
 - score operational supplier risk;
 - make contractual acceptance decisions;
+- generate opaque AI rationale for a recommendation;
 - accept hidden or unsupported scoring criteria;
 - treat file hashes as digital signatures or proof of authenticity.
 
@@ -134,6 +136,44 @@ Weight profiles are deliberately strict:
 
 The effective profile is returned in the output payload under `weights`, keeping each recommendation auditable.
 
+## Deterministic decision explanations
+
+Every scored supplier contains a `score_breakdown` showing the weighted contribution of each supported criterion to the final score:
+
+```json
+{
+  "name": "Supplier A",
+  "score": 97.1,
+  "score_breakdown": {
+    "price": 47.1,
+    "lead_time": 30.0,
+    "payment_terms": 20.0
+  }
+}
+```
+
+The result also identifies the runner-up and the score margin between the top two suppliers. `decision_explanation` then exposes the winning supplier's component scores and the supplier leading each raw commercial criterion:
+
+```json
+"decision_explanation": {
+  "winner": "Supplier A",
+  "runner_up": "Supplier B",
+  "score_margin": 30.0,
+  "winner_score_breakdown": {
+    "price": 47.1,
+    "lead_time": 30.0,
+    "payment_terms": 20.0
+  },
+  "criterion_leaders": {
+    "price": "Supplier B",
+    "lead_time": "Supplier A",
+    "payment_terms": "Supplier A"
+  }
+}
+```
+
+This is a deterministic explanation layer, not generated prose. Reviewers can reproduce every contribution from the quotation values and the effective weights rather than accepting an opaque narrative.
+
 ## Quotation provenance
 
 Every quotation loaded from a file receives an `rfqdiff_source` object. It records the input artifact used for that specific supplier row without storing the caller's full local path.
@@ -172,23 +212,23 @@ The provenance object stays with each supplier through scoring and JSON output. 
 
 CSV reports contain one ranked supplier per row with:
 
-- rank;
-- recommended flag;
-- supplier name;
-- currency and price;
-- lead time;
-- payment terms;
+- rank and recommended flag;
+- supplier name, currency and price;
+- lead time and payment terms;
 - final score;
+- price, lead-time and payment-term score contributions;
 - source provenance fields.
 
 Excel reports contain two worksheets:
 
-- `Comparison` — the ranked supplier table plus source provenance;
-- `Summary` — recommended supplier, lowest price, fastest lead time, best payment terms and the effective scoring weights.
+- `Comparison` — the ranked supplier table, component scores and source provenance;
+- `Summary` — recommended supplier, runner-up, score margin, lowest price, fastest lead time, best payment terms and effective scoring weights.
 
 The report uses the same scored payload as the JSON output, so the human-facing export and downstream integration result remain aligned.
 
-The JSON contract contains:
+## Machine-readable contract
+
+A result includes the recommendation, ranked suppliers, decision summary, explanation, effective weights and any quotation provenance:
 
 ```json
 {
@@ -200,6 +240,11 @@ The JSON contract contains:
     {
       "name": "Supplier A",
       "score": 97.1,
+      "score_breakdown": {
+        "price": 47.1,
+        "lead_time": 30.0,
+        "payment_terms": 20.0
+      },
       "rfqdiff_source": {
         "file": "quotations.csv",
         "format": "csv",
@@ -208,6 +253,11 @@ The JSON contract contains:
       }
     }
   ],
+  "decision_summary": {
+    "recommended_supplier": {"name": "Supplier A", "score": 97.1},
+    "runner_up": {"name": "Supplier B", "score": 67.1},
+    "score_margin": 30.0
+  },
   "weights": {
     "price": 0.5,
     "lead_time": 0.3,
@@ -216,7 +266,7 @@ The JSON contract contains:
 }
 ```
 
-The full supplier objects also include price, lead time, payment terms and any upstream normalization metadata.
+The full `decision_summary` also includes lowest price, fastest lead time and best payment terms. The full supplier objects include commercial values and any upstream normalization metadata.
 
 ## Public Python API
 
@@ -310,6 +360,7 @@ GitHub Actions validates:
 - source-file provenance, row/sheet traceability and SHA-256 fingerprints;
 - rejection of caller-supplied reserved provenance fields;
 - default and configurable scoring profiles;
+- criterion-level score breakdowns, runner-up selection and score margins;
 - rejection of incomplete or unsupported weight profiles;
 - CSV and Excel comparison report exports;
 - wheel and source-distribution builds;
@@ -319,9 +370,10 @@ GitHub Actions validates:
 
 ## Engineering principles
 
-- **Explicit scoring** — weights and criteria remain visible.
-- **Deterministic results** — identical supported inputs produce identical comparison results.
+- **Explicit scoring** — weights, criterion contributions and final scores remain visible.
+- **Deterministic explanations** — recommendation rationale is computed from the same scoring model, not generated as opaque prose.
 - **Traceable inputs** — loaded quotations retain source artifact fingerprints and tabular locations.
+- **Deterministic results** — identical supported inputs produce identical comparison results.
 - **Separation of concerns** — FX, technical compliance and supplier risk stay outside quotation scoring.
 - **Machine-readable handoff** — downstream tools consume a stable structured result instead of scraping presentation text.
 - **Review before authority** — a recommendation supports procurement judgment; it does not replace approval.
@@ -331,19 +383,17 @@ GitHub Actions validates:
 | Tool | Role |
 | --- | --- |
 | [`currency-normalizer`](https://github.com/yigitcan-ozturk/currency-normalizer) | Normalize quotation values across currencies |
-| **[`rfqdiff`](https://github.com/yigitcan-ozturk/rfqdiff)** | Compare and score normalized quotations |
+| **[`rfqdiff`](https://github.com/yigitcan-ozturk/rfqdiff)** | Compare and explain normalized commercial quotations |
 | [`payment-terms-parser`](https://github.com/yigitcan-ozturk/payment-terms-parser) | Convert payment terms into commercial-risk signals |
 | [`vendor-risk-engine`](https://github.com/yigitcan-ozturk/vendor-risk-engine) | Score operational, quality, compliance and dependency risk |
 | [`bidlint`](https://github.com/yigitcan-ozturk/bidlint) | Produce evidence-backed technical-compliance findings and scores |
 | [`supplier-scorecard`](https://github.com/yigitcan-ozturk/supplier-scorecard) | Combine commercial, risk and technical signals into one supplier recommendation |
 
-## Roadmap
-
-- Richer decision explanations
-
 ## Status
 
-Early-stage project, currently at **v0.2**. The current line provides a stable JSON integration contract, an installable Python package and console CLI, JSON/CSV/XLSX quotation ingestion, auditable configurable commercial scoring weights, CSV/XLSX comparison report export, and source-level quotation provenance.
+Early-stage project, currently at **v0.2**. The v0.2 development line now provides JSON/CSV/XLSX quotation ingestion, auditable configurable weights, criterion-level scoring explanations, source provenance, CSV/XLSX report export, an installable Python package and console CLI, and a stable machine-readable integration contract.
+
+The original v0.2 product roadmap is implemented. The next milestone is release/pilot hardening rather than adding more scoring criteria to this tool.
 
 ## License
 
