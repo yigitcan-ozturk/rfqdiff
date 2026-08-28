@@ -1,5 +1,6 @@
 import argparse
 import csv
+import hashlib
 import json
 import math
 from pathlib import Path
@@ -22,6 +23,8 @@ REQUIRED_FIELDS = [
     "payment_days",
 ]
 
+RESERVED_FIELDS = {"rfqdiff_source"}
+
 
 def _coerce_number(value: Any, field: str, source: str) -> int | float:
     if isinstance(value, bool):
@@ -41,6 +44,12 @@ def _coerce_number(value: Any, field: str, source: str) -> int | float:
 
 
 def validate_quote(quote: dict[str, Any], source: str) -> dict[str, Any]:
+    reserved = sorted(RESERVED_FIELDS.intersection(quote))
+    if reserved:
+        raise ValueError(
+            f"{source}: reserved field(s) cannot be supplied: {', '.join(reserved)}"
+        )
+
     missing = [field for field in REQUIRED_FIELDS if field not in quote]
     if missing:
         raise ValueError(
@@ -76,6 +85,37 @@ def validate_quote(quote: dict[str, Any], source: str) -> dict[str, Any]:
     return validated
 
 
+def file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as file:
+        for chunk in iter(lambda: file.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def attach_source(
+    quote: dict[str, Any],
+    path: Path,
+    source_format: str,
+    sha256: str,
+    *,
+    row: int | None = None,
+    sheet: str | None = None,
+) -> dict[str, Any]:
+    sourced = quote.copy()
+    source: dict[str, Any] = {
+        "file": path.name,
+        "format": source_format,
+        "sha256": sha256,
+    }
+    if row is not None:
+        source["row"] = row
+    if sheet is not None:
+        source["sheet"] = sheet
+    sourced["rfqdiff_source"] = source
+    return sourced
+
+
 def load_quote(path: Path) -> dict[str, Any]:
     with path.open("r", encoding="utf-8") as file:
         quote = json.load(file)
@@ -83,10 +123,12 @@ def load_quote(path: Path) -> dict[str, Any]:
     if not isinstance(quote, dict):
         raise ValueError(f"{path}: quotation JSON must contain one object")
 
-    return validate_quote(quote, str(path))
+    validated = validate_quote(quote, str(path))
+    return attach_source(validated, path, "json", file_sha256(path))
 
 
 def load_csv_quotes(path: Path) -> list[dict[str, Any]]:
+    sha256 = file_sha256(path)
     with path.open("r", encoding="utf-8-sig", newline="") as file:
         reader = csv.DictReader(file)
         fieldnames = reader.fieldnames or []
@@ -96,11 +138,20 @@ def load_csv_quotes(path: Path) -> list[dict[str, Any]]:
                 f"{path}: missing required column(s): {', '.join(missing)}"
             )
 
-        quotes = [
-            validate_quote(dict(row), f"{path}: row {row_number}")
-            for row_number, row in enumerate(reader, start=2)
-            if any(value not in (None, "") for value in row.values())
-        ]
+        quotes = []
+        for row_number, row in enumerate(reader, start=2):
+            if not any(value not in (None, "") for value in row.values()):
+                continue
+            validated = validate_quote(dict(row), f"{path}: row {row_number}")
+            quotes.append(
+                attach_source(
+                    validated,
+                    path,
+                    "csv",
+                    sha256,
+                    row=row_number,
+                )
+            )
 
     if not quotes:
         raise ValueError(f"{path}: no supplier quotations found")
@@ -115,6 +166,7 @@ def load_xlsx_quotes(path: Path) -> list[dict[str, Any]]:
             "Excel import requires openpyxl. Install the project package dependencies first."
         ) from error
 
+    sha256 = file_sha256(path)
     workbook = load_workbook(path, read_only=True, data_only=True)
     try:
         worksheet = workbook.active
@@ -138,7 +190,17 @@ def load_xlsx_quotes(path: Path) -> list[dict[str, Any]]:
             if not any(value not in (None, "") for value in values):
                 continue
             row = dict(zip(fieldnames, values))
-            quotes.append(validate_quote(row, f"{path}: row {row_number}"))
+            validated = validate_quote(row, f"{path}: row {row_number}")
+            quotes.append(
+                attach_source(
+                    validated,
+                    path,
+                    "xlsx",
+                    sha256,
+                    row=row_number,
+                    sheet=worksheet.title,
+                )
+            )
     finally:
         workbook.close()
 
@@ -362,6 +424,17 @@ def write_json(payload: dict[str, Any], path: Path) -> None:
     )
 
 
+def _report_source_fields(quote: dict[str, Any]) -> dict[str, Any]:
+    source = quote.get("rfqdiff_source", {})
+    return {
+        "source_file": source.get("file", ""),
+        "source_format": source.get("format", ""),
+        "source_sha256": source.get("sha256", ""),
+        "source_row": source.get("row", ""),
+        "source_sheet": source.get("sheet", ""),
+    }
+
+
 def write_csv_report(payload: dict[str, Any], path: Path) -> None:
     fieldnames = [
         "rank",
@@ -372,23 +445,28 @@ def write_csv_report(payload: dict[str, Any], path: Path) -> None:
         "lead_time_weeks",
         "payment_days",
         "score",
+        "source_file",
+        "source_format",
+        "source_sha256",
+        "source_row",
+        "source_sheet",
     ]
     with path.open("w", encoding="utf-8", newline="") as file:
         writer = csv.DictWriter(file, fieldnames=fieldnames)
         writer.writeheader()
         for rank, quote in enumerate(payload["suppliers"], start=1):
-            writer.writerow(
-                {
-                    "rank": rank,
-                    "recommended": quote["name"] == payload["recommended_supplier"],
-                    "name": quote["name"],
-                    "currency": payload["currency"],
-                    "price": quote["price"],
-                    "lead_time_weeks": quote["lead_time_weeks"],
-                    "payment_days": quote["payment_days"],
-                    "score": quote["score"],
-                }
-            )
+            row = {
+                "rank": rank,
+                "recommended": quote["name"] == payload["recommended_supplier"],
+                "name": quote["name"],
+                "currency": payload["currency"],
+                "price": quote["price"],
+                "lead_time_weeks": quote["lead_time_weeks"],
+                "payment_days": quote["payment_days"],
+                "score": quote["score"],
+            }
+            row.update(_report_source_fields(quote))
+            writer.writerow(row)
 
 
 def write_xlsx_report(payload: dict[str, Any], path: Path) -> None:
@@ -412,9 +490,15 @@ def write_xlsx_report(payload: dict[str, Any], path: Path) -> None:
             "Lead Time (Weeks)",
             "Payment Days",
             "Score",
+            "Source File",
+            "Source Format",
+            "Source SHA-256",
+            "Source Row",
+            "Source Sheet",
         ]
     )
     for rank, quote in enumerate(payload["suppliers"], start=1):
+        source = quote.get("rfqdiff_source", {})
         comparison.append(
             [
                 rank,
@@ -425,6 +509,11 @@ def write_xlsx_report(payload: dict[str, Any], path: Path) -> None:
                 quote["lead_time_weeks"],
                 quote["payment_days"],
                 quote["score"],
+                source.get("file", ""),
+                source.get("format", ""),
+                source.get("sha256", ""),
+                source.get("row", ""),
+                source.get("sheet", ""),
             ]
         )
     comparison.freeze_panes = "A2"
