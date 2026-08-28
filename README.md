@@ -24,6 +24,7 @@ It does:
 
 - compare price, lead time and payment terms;
 - import quotations from JSON, CSV and Excel (`.xlsx`);
+- use explicit default or user-supplied commercial scoring weights;
 - produce deterministic supplier scores;
 - return machine-readable JSON for downstream decision systems;
 - preserve upstream normalization metadata when present in JSON inputs.
@@ -34,7 +35,7 @@ It intentionally does **not**:
 - determine technical compliance;
 - score operational supplier risk;
 - make contractual acceptance decisions;
-- hide unsupported criteria inside an opaque composite score.
+- accept hidden or unsupported scoring criteria.
 
 Those responsibilities remain separated across the engineering procurement toolchain.
 
@@ -90,6 +91,39 @@ rfqdiff samples/quotations.csv --output rfq.json
 
 JSON, CSV and XLSX inputs can also be combined in one command as long as every quotation uses the same currency.
 
+## Configurable scoring weights
+
+The default commercial model is:
+
+| Criterion | Weight | Better score |
+| --- | ---: | --- |
+| Price | 50% | Lower |
+| Lead time | 30% | Lower |
+| Payment terms | 20% | Longer |
+
+For a different procurement strategy, pass a JSON weights profile with `--weights`:
+
+```json
+{
+  "price": 0.40,
+  "lead_time": 0.40,
+  "payment_terms": 0.20
+}
+```
+
+```bash
+rfqdiff samples/quotations.csv --weights samples/weights-balanced.json
+```
+
+Weight profiles are deliberately strict:
+
+- all three supported criteria must be present;
+- no additional criteria are accepted;
+- each value must be between `0` and `1`;
+- values must sum to exactly `1.0` within floating-point tolerance.
+
+The effective profile is returned in the output payload under `weights`, keeping each recommendation auditable.
+
 The JSON contract contains:
 
 ```json
@@ -103,7 +137,12 @@ The JSON contract contains:
       "name": "Supplier A",
       "score": 97.1
     }
-  ]
+  ],
+  "weights": {
+    "price": 0.5,
+    "lead_time": 0.3,
+    "payment_terms": 0.2
+  }
 }
 ```
 
@@ -120,13 +159,21 @@ scored = rfqdiff.score_quotes([
 ])
 ```
 
-Tabular files can be loaded through the public API as well:
+Custom weights can be supplied through the public API:
+
+```python
+weights = {"price": 0.4, "lead_time": 0.4, "payment_terms": 0.2}
+scored = rfqdiff.score_quotes(quotes, weights)
+```
+
+Tabular files and weight profiles can be loaded through the public API as well:
 
 ```python
 from pathlib import Path
 import rfqdiff
 
 quotes = rfqdiff.load_quotes(Path("quotations.xlsx"))
+weights = rfqdiff.load_weights(Path("weights.json"))
 ```
 
 ## Quotation format
@@ -163,16 +210,6 @@ Supplier B,EUR,79400,14,0
 
 All quotations must use the same currency. For mixed currencies, normalize them first with `currency-normalizer`, then pass the normalized values to `rfqdiff`.
 
-## Scoring model
-
-| Criterion | Weight | Better score |
-| --- | ---: | --- |
-| Price | 50% | Lower |
-| Lead time | 30% | Lower |
-| Payment terms | 20% | Longer |
-
-The score is intentionally explicit so the recommendation can be reviewed rather than treated as a black box.
-
 ## Pipeline role
 
 ```text
@@ -193,6 +230,8 @@ GitHub Actions validates:
 
 - unit tests on Python 3.11, 3.12 and 3.13;
 - JSON, CSV and Excel quotation loading;
+- default and configurable scoring profiles;
+- rejection of incomplete or unsupported weight profiles;
 - wheel and source-distribution builds;
 - package metadata with `twine check`;
 - installation of the built wheel and runtime dependencies;
@@ -219,14 +258,13 @@ GitHub Actions validates:
 
 ## Roadmap
 
-- Configurable commercial scoring weights
 - Exportable comparison reports
 - Richer quotation provenance
 - Richer decision explanations
 
 ## Status
 
-Early-stage project, currently at **v0.2**. The current line provides a stable JSON integration contract, an installable Python package and console CLI, plus JSON/CSV/XLSX quotation ingestion.
+Early-stage project, currently at **v0.2**. The current line provides a stable JSON integration contract, an installable Python package and console CLI, JSON/CSV/XLSX quotation ingestion, and auditable configurable commercial scoring weights.
 
 ## License
 

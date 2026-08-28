@@ -1,6 +1,7 @@
 import argparse
 import csv
 import json
+import math
 from pathlib import Path
 from typing import Any
 
@@ -170,7 +171,56 @@ def validate_currencies(quotes: list[dict[str, Any]]) -> str:
     return next(iter(currencies))
 
 
-def score_quotes(quotes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def validate_weights(weights: dict[str, Any]) -> dict[str, float]:
+    expected = set(WEIGHTS)
+    supplied = set(weights)
+
+    missing = sorted(expected - supplied)
+    if missing:
+        raise ValueError(f"weights: missing required key(s): {', '.join(missing)}")
+
+    unsupported = sorted(supplied - expected)
+    if unsupported:
+        raise ValueError(f"weights: unsupported key(s): {', '.join(unsupported)}")
+
+    validated: dict[str, float] = {}
+    for key in WEIGHTS:
+        value = weights[key]
+        if isinstance(value, bool):
+            raise ValueError(f"weights: {key} must be numeric")
+        try:
+            number = float(value)
+        except (TypeError, ValueError) as error:
+            raise ValueError(f"weights: {key} must be numeric") from error
+        if number < 0 or number > 1:
+            raise ValueError(f"weights: {key} must be between 0 and 1")
+        validated[key] = number
+
+    total = sum(validated.values())
+    if not math.isclose(total, 1.0, rel_tol=0.0, abs_tol=1e-9):
+        raise ValueError(f"weights: values must sum to 1.0; got {total:g}")
+
+    return validated
+
+
+def load_weights(path: Path) -> dict[str, float]:
+    with path.open("r", encoding="utf-8") as file:
+        weights = json.load(file)
+
+    if not isinstance(weights, dict):
+        raise ValueError(f"{path}: weights JSON must contain one object")
+
+    try:
+        return validate_weights(weights)
+    except ValueError as error:
+        raise ValueError(f"{path}: {error}") from error
+
+
+def score_quotes(
+    quotes: list[dict[str, Any]],
+    weights: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    effective_weights = validate_weights(WEIGHTS if weights is None else weights)
     min_price = min(quote["price"] for quote in quotes)
     min_lead_time = min(quote["lead_time_weeks"] for quote in quotes)
     max_payment_days = max(quote["payment_days"] for quote in quotes)
@@ -178,17 +228,19 @@ def score_quotes(quotes: list[dict[str, Any]]) -> list[dict[str, Any]]:
     scored_quotes = []
 
     for quote in quotes:
-        price_score = (min_price / quote["price"]) * WEIGHTS["price"] * 100
+        price_score = (
+            min_price / quote["price"]
+        ) * effective_weights["price"] * 100
         lead_time_score = (
             min_lead_time / quote["lead_time_weeks"]
-        ) * WEIGHTS["lead_time"] * 100
+        ) * effective_weights["lead_time"] * 100
 
         if max_payment_days == 0:
-            payment_score = WEIGHTS["payment_terms"] * 100
+            payment_score = effective_weights["payment_terms"] * 100
         else:
             payment_score = (
                 quote["payment_days"] / max_payment_days
-            ) * WEIGHTS["payment_terms"] * 100
+            ) * effective_weights["payment_terms"] * 100
 
         total_score = price_score + lead_time_score + payment_score
 
@@ -205,7 +257,9 @@ def score_quotes(quotes: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def build_result(
     scored_quotes: list[dict[str, Any]],
     currency: str,
+    weights: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    effective_weights = validate_weights(WEIGHTS if weights is None else weights)
     winner = scored_quotes[0]
     cheapest = min(scored_quotes, key=lambda item: item["price"])
     fastest = min(scored_quotes, key=lambda item: item["lead_time_weeks"])
@@ -235,7 +289,7 @@ def build_result(
                 "payment_days": best_terms["payment_days"],
             },
         },
-        "weights": WEIGHTS,
+        "weights": effective_weights,
     }
 
 
@@ -243,7 +297,12 @@ def money(value: float, currency: str) -> str:
     return f"{currency} {value:,.2f}"
 
 
-def print_report(quotes: list[dict[str, Any]], currency: str) -> None:
+def print_report(
+    quotes: list[dict[str, Any]],
+    currency: str,
+    weights: dict[str, Any] | None = None,
+) -> None:
+    effective_weights = validate_weights(WEIGHTS if weights is None else weights)
     print(f"\nRFQDIFF v{VERSION}")
     print("=" * 86)
     print(
@@ -264,7 +323,7 @@ def print_report(quotes: list[dict[str, Any]], currency: str) -> None:
             f"{str(quote['score']) + '/100':>12}"
         )
 
-    payload = build_result(quotes, currency)
+    payload = build_result(quotes, currency, effective_weights)
     summary = payload["decision_summary"]
     winner = summary["recommended_supplier"]
     cheapest = summary["lowest_price"]
@@ -289,7 +348,9 @@ def print_report(quotes: list[dict[str, Any]], currency: str) -> None:
 
     print("\nScoring weights")
     print(
-        "Price 50% | Lead time 30% | Payment terms 20%\n"
+        f"Price {effective_weights['price']:.0%} | "
+        f"Lead time {effective_weights['lead_time']:.0%} | "
+        f"Payment terms {effective_weights['payment_terms']:.0%}\n"
         "Lower price and lead time score higher; longer payment terms score higher."
     )
 
@@ -312,6 +373,11 @@ def parse_args() -> argparse.Namespace:
         help="Quotation files (.json, .csv or .xlsx). Tabular files may contain multiple suppliers.",
     )
     parser.add_argument(
+        "--weights",
+        type=Path,
+        help="JSON file with price, lead_time and payment_terms weights summing to 1.0.",
+    )
+    parser.add_argument(
         "--json",
         action="store_true",
         help="Return a machine-readable comparison payload.",
@@ -332,8 +398,9 @@ def main() -> None:
         if len(quotes) < 2:
             raise ValueError("rfqdiff needs at least two supplier quotations.")
         currency = validate_currencies(quotes)
-        scored_quotes = score_quotes(quotes)
-        payload = build_result(scored_quotes, currency)
+        weights = load_weights(args.weights) if args.weights else validate_weights(WEIGHTS)
+        scored_quotes = score_quotes(quotes, weights)
+        payload = build_result(scored_quotes, currency, weights)
     except (OSError, json.JSONDecodeError, ValueError) as error:
         raise SystemExit(f"Error: {error}") from error
 
@@ -343,7 +410,7 @@ def main() -> None:
     if args.json:
         print(json.dumps(payload, indent=2, ensure_ascii=False))
     else:
-        print_report(scored_quotes, currency)
+        print_report(scored_quotes, currency, weights)
 
 
 if __name__ == "__main__":
