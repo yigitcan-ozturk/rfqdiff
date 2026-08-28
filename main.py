@@ -362,6 +362,128 @@ def write_json(payload: dict[str, Any], path: Path) -> None:
     )
 
 
+def write_csv_report(payload: dict[str, Any], path: Path) -> None:
+    fieldnames = [
+        "rank",
+        "recommended",
+        "name",
+        "currency",
+        "price",
+        "lead_time_weeks",
+        "payment_days",
+        "score",
+    ]
+    with path.open("w", encoding="utf-8", newline="") as file:
+        writer = csv.DictWriter(file, fieldnames=fieldnames)
+        writer.writeheader()
+        for rank, quote in enumerate(payload["suppliers"], start=1):
+            writer.writerow(
+                {
+                    "rank": rank,
+                    "recommended": quote["name"] == payload["recommended_supplier"],
+                    "name": quote["name"],
+                    "currency": payload["currency"],
+                    "price": quote["price"],
+                    "lead_time_weeks": quote["lead_time_weeks"],
+                    "payment_days": quote["payment_days"],
+                    "score": quote["score"],
+                }
+            )
+
+
+def write_xlsx_report(payload: dict[str, Any], path: Path) -> None:
+    try:
+        from openpyxl import Workbook
+    except ImportError as error:
+        raise ValueError(
+            "Excel report export requires openpyxl. Install the project package dependencies first."
+        ) from error
+
+    workbook = Workbook()
+    comparison = workbook.active
+    comparison.title = "Comparison"
+    comparison.append(
+        [
+            "Rank",
+            "Recommended",
+            "Supplier",
+            "Currency",
+            "Price",
+            "Lead Time (Weeks)",
+            "Payment Days",
+            "Score",
+        ]
+    )
+    for rank, quote in enumerate(payload["suppliers"], start=1):
+        comparison.append(
+            [
+                rank,
+                quote["name"] == payload["recommended_supplier"],
+                quote["name"],
+                payload["currency"],
+                quote["price"],
+                quote["lead_time_weeks"],
+                quote["payment_days"],
+                quote["score"],
+            ]
+        )
+    comparison.freeze_panes = "A2"
+    comparison.auto_filter.ref = comparison.dimensions
+
+    summary = workbook.create_sheet("Summary")
+    decision = payload["decision_summary"]
+    summary.append(["Metric", "Supplier", "Value"])
+    summary.append(
+        [
+            "Recommended supplier",
+            decision["recommended_supplier"]["name"],
+            decision["recommended_supplier"]["score"],
+        ]
+    )
+    summary.append(
+        [
+            "Lowest price",
+            decision["lowest_price"]["name"],
+            decision["lowest_price"]["price"],
+        ]
+    )
+    summary.append(
+        [
+            "Fastest lead time",
+            decision["fastest_lead_time"]["name"],
+            decision["fastest_lead_time"]["lead_time_weeks"],
+        ]
+    )
+    summary.append(
+        [
+            "Best payment terms",
+            decision["best_payment_terms"]["name"],
+            decision["best_payment_terms"]["payment_days"],
+        ]
+    )
+    summary.append([])
+    summary.append(["Scoring criterion", "Weight"])
+    for criterion, weight in payload["weights"].items():
+        summary.append([criterion, weight])
+    summary.freeze_panes = "A2"
+
+    workbook.save(path)
+    workbook.close()
+
+
+def write_report(payload: dict[str, Any], path: Path) -> None:
+    suffix = path.suffix.lower()
+    if suffix == ".csv":
+        write_csv_report(payload, path)
+        return
+    if suffix == ".xlsx":
+        write_xlsx_report(payload, path)
+        return
+    raise ValueError(
+        f"{path}: unsupported report format '{suffix or '<none>'}'. Use .csv or .xlsx."
+    )
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Compare supplier quotations from JSON, CSV or Excel files."
@@ -387,6 +509,11 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         help="Write the machine-readable comparison payload to a JSON file.",
     )
+    parser.add_argument(
+        "--report",
+        type=Path,
+        help="Write a comparison report as .csv or .xlsx.",
+    )
     return parser.parse_args()
 
 
@@ -401,11 +528,13 @@ def main() -> None:
         weights = load_weights(args.weights) if args.weights else validate_weights(WEIGHTS)
         scored_quotes = score_quotes(quotes, weights)
         payload = build_result(scored_quotes, currency, weights)
+
+        if args.output:
+            write_json(payload, args.output)
+        if args.report:
+            write_report(payload, args.report)
     except (OSError, json.JSONDecodeError, ValueError) as error:
         raise SystemExit(f"Error: {error}") from error
-
-    if args.output:
-        write_json(payload, args.output)
 
     if args.json:
         print(json.dumps(payload, indent=2, ensure_ascii=False))
