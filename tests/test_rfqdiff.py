@@ -131,6 +131,46 @@ class CurrencyValidationTests(unittest.TestCase):
             rfqdiff.validate_currencies(quotes)
 
 
+class WeightValidationTests(unittest.TestCase):
+    def test_validate_weights_accepts_explicit_profile(self) -> None:
+        weights = {
+            "price": 0.60,
+            "lead_time": 0.25,
+            "payment_terms": 0.15,
+        }
+        self.assertEqual(rfqdiff.validate_weights(weights), weights)
+
+    def test_validate_weights_rejects_incomplete_profile(self) -> None:
+        with self.assertRaisesRegex(ValueError, "payment_terms"):
+            rfqdiff.validate_weights({"price": 0.7, "lead_time": 0.3})
+
+    def test_validate_weights_rejects_unsupported_criteria(self) -> None:
+        with self.assertRaisesRegex(ValueError, "unsupported"):
+            rfqdiff.validate_weights(
+                {
+                    "price": 0.5,
+                    "lead_time": 0.3,
+                    "payment_terms": 0.1,
+                    "relationship": 0.1,
+                }
+            )
+
+    def test_validate_weights_rejects_total_other_than_one(self) -> None:
+        with self.assertRaisesRegex(ValueError, "sum to 1.0"):
+            rfqdiff.validate_weights(
+                {"price": 0.5, "lead_time": 0.3, "payment_terms": 0.3}
+            )
+
+    def test_load_weights_reads_json_profile(self) -> None:
+        weights = {"price": 0.4, "lead_time": 0.4, "payment_terms": 0.2}
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "weights.json"
+            path.write_text(json.dumps(weights), encoding="utf-8")
+            loaded = rfqdiff.load_weights(path)
+
+        self.assertEqual(loaded, weights)
+
+
 class ScoringTests(unittest.TestCase):
     def setUp(self) -> None:
         self.quotes = [
@@ -179,6 +219,34 @@ class ScoringTests(unittest.TestCase):
         self.assertEqual(scored[0]["name"], "Supplier A")
         self.assertEqual(scored[0]["score"], 100.0)
 
+    def test_custom_weights_can_change_recommendation(self) -> None:
+        quotes = [
+            {
+                "name": "Supplier A",
+                "currency": "EUR",
+                "price": 100,
+                "lead_time_weeks": 4,
+                "payment_days": 0,
+            },
+            {
+                "name": "Supplier B",
+                "currency": "EUR",
+                "price": 150,
+                "lead_time_weeks": 8,
+                "payment_days": 60,
+            },
+        ]
+        default_scored = rfqdiff.score_quotes(quotes)
+        custom_weights = {
+            "price": 0.10,
+            "lead_time": 0.10,
+            "payment_terms": 0.80,
+        }
+        custom_scored = rfqdiff.score_quotes(quotes, custom_weights)
+
+        self.assertEqual(default_scored[0]["name"], "Supplier A")
+        self.assertEqual(custom_scored[0]["name"], "Supplier B")
+
     def test_build_result_is_pipeline_ready(self) -> None:
         scored = rfqdiff.score_quotes(self.quotes)
         payload = rfqdiff.build_result(scored, "EUR")
@@ -187,7 +255,15 @@ class ScoringTests(unittest.TestCase):
         self.assertEqual(payload["version"], "0.2")
         self.assertEqual(payload["recommended_supplier"], "Supplier A")
         self.assertEqual(payload["suppliers"][0]["score"], 97.1)
+        self.assertEqual(payload["weights"], rfqdiff.WEIGHTS)
         json.dumps(payload)
+
+    def test_build_result_records_custom_weights(self) -> None:
+        weights = {"price": 0.4, "lead_time": 0.4, "payment_terms": 0.2}
+        scored = rfqdiff.score_quotes(self.quotes, weights)
+        payload = rfqdiff.build_result(scored, "EUR", weights)
+
+        self.assertEqual(payload["weights"], weights)
 
     def test_write_json_round_trip(self) -> None:
         scored = rfqdiff.score_quotes(self.quotes)
