@@ -10,6 +10,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
 authors = [{ name = "Yiğitcan Öztürk" }]
+dependencies = ["openpyxl>=3.1,<4"]
 keywords = ["procurement", "rfq", "quotations", "supplier-management", "decision-support", "supply-chain"]
 classifiers = [
   "Development Status :: 3 - Alpha",
