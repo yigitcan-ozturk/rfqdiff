@@ -32,6 +32,19 @@ class PackageTests(unittest.TestCase):
         self.assertEqual(len(quotes), 2)
         self.assertEqual(quotes[0]["name"], "A")
 
+    def test_public_report_export_api(self):
+        quotes = [
+            {"name": "A", "currency": "EUR", "price": 100, "lead_time_weeks": 4, "payment_days": 30},
+            {"name": "B", "currency": "EUR", "price": 120, "lead_time_weeks": 5, "payment_days": 0},
+        ]
+        scored = rfqdiff.score_quotes(quotes)
+        payload = rfqdiff.build_result(scored, "EUR")
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "comparison.csv"
+            rfqdiff.write_report(payload, path)
+            self.assertTrue(path.exists())
+
 
 if __name__ == "__main__":
     unittest.main()
