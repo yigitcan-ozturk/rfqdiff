@@ -6,9 +6,11 @@ from main import (
     build_result,
     load_quote,
     load_quotes,
+    load_weights,
     score_quotes,
     validate_currencies,
     validate_quote,
+    validate_weights,
 )
 
 __version__ = "0.2.0"
@@ -20,7 +22,9 @@ __all__ = [
     "build_result",
     "load_quote",
     "load_quotes",
+    "load_weights",
     "score_quotes",
     "validate_currencies",
     "validate_quote",
+    "validate_weights",
 ]
