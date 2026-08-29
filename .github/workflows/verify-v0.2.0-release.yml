@@ -1,0 +1,124 @@
+name: Verify rfqdiff v0.2.0 Release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/verify-v0.2.0-release.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  verify-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Download published wheel
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/release"
+          gh release download v0.2.0 \
+            --pattern "rfqdiff-0.2.0-py3-none-any.whl" \
+            --dir "$RUNNER_TEMP/release"
+
+      - name: Verify published wheel digest
+        run: |
+          python - <<'PY'
+          import hashlib
+          import os
+          from pathlib import Path
+
+          wheel = Path(os.environ["RUNNER_TEMP"]) / "release" / "rfqdiff-0.2.0-py3-none-any.whl"
+          digest = hashlib.sha256(wheel.read_bytes()).hexdigest()
+          expected = "858a0c7a7b0caf69f4b1f22843363edd8d14cad4553564539abcbc33ec878fa5"
+          assert digest == expected, (digest, expected)
+          PY
+
+      - name: Clean-install published wheel
+        run: |
+          python -m venv "$RUNNER_TEMP/release-venv"
+          "$RUNNER_TEMP/release-venv/bin/python" -m pip install --upgrade pip
+          "$RUNNER_TEMP/release-venv/bin/python" -m pip install \
+            "$RUNNER_TEMP/release/rfqdiff-0.2.0-py3-none-any.whl"
+          "$RUNNER_TEMP/release-venv/bin/rfqdiff" --help
+
+      - name: Run representative released comparison
+        run: |
+          cat > "$RUNNER_TEMP/quotes.csv" <<'CSV'
+          name,currency,price,lead_time_weeks,payment_days
+          Supplier A,EUR,84200,8,30
+          Supplier B,EUR,79400,14,0
+          CSV
+
+          "$RUNNER_TEMP/release-venv/bin/rfqdiff" \
+            "$RUNNER_TEMP/quotes.csv" \
+            --json > "$RUNNER_TEMP/result.json"
+
+          "$RUNNER_TEMP/release-venv/bin/rfqdiff" \
+            "$RUNNER_TEMP/quotes.csv" \
+            --report "$RUNNER_TEMP/comparison.xlsx"
+
+      - name: Validate released output contract
+        run: |
+          "$RUNNER_TEMP/release-venv/bin/python" - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          from openpyxl import load_workbook
+
+          root = Path(os.environ["RUNNER_TEMP"])
+          payload = json.loads((root / "result.json").read_text(encoding="utf-8"))
+
+          assert payload["tool"] == "rfqdiff", payload
+          assert payload["version"] == "0.2", payload
+          assert payload["recommended_supplier"] == "Supplier A", payload
+          assert payload["decision_summary"]["runner_up"]["name"] == "Supplier B", payload
+          assert payload["decision_summary"]["score_margin"] == 30.0, payload
+          assert payload["decision_explanation"]["criterion_leaders"] == {
+              "price": "Supplier B",
+              "lead_time": "Supplier A",
+              "payment_terms": "Supplier A",
+          }, payload
+
+          winner = payload["suppliers"][0]
+          assert winner["score"] == 97.1, winner
+          assert winner["score_breakdown"] == {
+              "price": 47.1,
+              "lead_time": 30.0,
+              "payment_terms": 20.0,
+          }, winner
+          source = winner["rfqdiff_source"]
+          assert source["file"] == "quotes.csv", source
+          assert source["format"] == "csv", source
+          assert source["row"] == 2, source
+          assert len(source["sha256"]) == 64, source
+
+          workbook = load_workbook(root / "comparison.xlsx", read_only=True, data_only=True)
+          try:
+              assert workbook.sheetnames == ["Comparison", "Summary"], workbook.sheetnames
+              comparison = workbook["Comparison"]
+              summary = workbook["Summary"]
+              assert comparison["C2"].value == "Supplier A"
+              assert comparison["B2"].value is True
+              assert summary["B2"].value == "Supplier A"
+          finally:
+              workbook.close()
+          PY
+
+      - name: Upload release verification evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: rfqdiff-v0.2.0-release-verification
+          path: |
+            ${{ runner.temp }}/result.json
+            ${{ runner.temp }}/comparison.xlsx
+          if-no-files-found: error
