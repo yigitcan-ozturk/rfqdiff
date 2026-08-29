@@ -2,9 +2,9 @@
 
 All notable changes to `rfqdiff` are documented here.
 
-## [0.2.0] - Unreleased
+## [0.2.0] - 2026-08-29
 
-Release hardening is in progress. The package metadata and machine-readable contract are on the v0.2 line; the latest published GitHub Release is still v0.1.0 until the v0.2.0 release is created.
+The v0.2 line completes the original productization roadmap and release-hardening work for transparent, auditable commercial quotation comparison.
 
 ### Added
 
@@ -20,6 +20,8 @@ Release hardening is in progress. The package metadata and machine-readable cont
 - Public Python helpers for quotation loading, weight validation and report export.
 - Test coverage across Python 3.11, 3.12 and 3.13.
 - Wheel/source-distribution build validation and installed-package smoke tests in CI.
+- Sanitized industrial golden-pilot coverage for the complete quotation decision flow.
+- Downstream compatibility verification with `supplier-scorecard` and the multi-tool Phase 2 procurement pilot.
 
 ### Changed
 
